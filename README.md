@@ -2,7 +2,7 @@ This is a computational package with algorithms for finding synchronizing (reset
 See surveys about synchronizing automata [1,5,6].
 
 The package contains implementations of heuristic algorithms that find some (possibly short) reset word and the exact exponential algorithm.
-Heuristics include algorithms like Eppstein, SynchroPL, and Beam [4].
+Heuristics include algorithms like Eppstein and Beam [4].
 The exact algorithm is an enhanced version of the fastest known approach based on bidirectional search [2,3].
 
 The implementation is intented to be highly efficient and includes major improvements.
@@ -11,6 +11,12 @@ It uses just-in-time compilation and optionally multithreading and GPU (CUDA).
 * [Installation and usage](docs/install.md)
 
 * [Configuration files and available algorithms](docs/config.md)
+
+### Authors ###
+
+* Marek Szykuła (2022)
+
+* Adam Zyzik (2022)
 
 ### Main references ###
 
