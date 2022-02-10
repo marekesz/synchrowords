@@ -1,0 +1,14 @@
+{
+    "upper_bound": "1ULL * AUT_N * AUT_N * AUT_N / 6",
+    "threads": 1,
+    "gpu": false,
+    "algorithms": [
+        {
+            "name": "Eppstein",
+            "config": {
+                "transition_tables": false,
+                "find_word": true
+            }
+        }
+    ]
+}

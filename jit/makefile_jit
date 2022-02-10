@@ -1,0 +1,15 @@
+CC := g++
+CPPFLAGS := -std=c++17 -Wall -Wno-unused -Wextra -Ofast -flto -s -DNDEBUG -march=native -fPIC -I . -pthread
+LDFLAGS := -shared -pthread
+
+SOURCES := jitmain.cpp $(shell find synchrolib/ -name '*.cpp')
+OBJECTS := $(SOURCES:.cpp=.o)
+TARGET := libsynchro.so
+
+all: $(TARGET)
+
+$(TARGET) : $(OBJECTS)
+	$(CC) $(OBJECTS) -o $@ $(LDFLAGS)
+
+%.o : %.cpp
+	$(CC) $(CPPFLAGS) -c $< -o $@

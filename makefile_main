@@ -1,0 +1,15 @@
+CC := g++
+CPPFLAGS := -std=c++17 -Ofast -march=native -flto -DNDEBUG -s -I . -Wl,--no-as-needed -pthread
+LDFLAGS := -ldl -pthread -Wl,--no-as-needed
+
+SOURCES := $(shell find app/ -name '*.cpp')
+OBJECTS := $(SOURCES:.cpp=.o)
+TARGET := build/main
+
+all: $(TARGET)
+
+$(TARGET) : $(OBJECTS)
+	$(CC) $(OBJECTS) -o $@ $(LDFLAGS)
+
+%.o : %.cpp
+	$(CC) $(CPPFLAGS) -c $< -o $@

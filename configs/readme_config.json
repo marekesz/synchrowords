@@ -1,0 +1,44 @@
+{
+    "upper_bound": "1ULL * AUT_N * AUT_N * AUT_N / 6",
+    "threads": 1,
+    "gpu": false,
+    "algorithms": [
+        {
+            "name": "Brute",
+            "config": {
+                "max_n": "20"
+            }
+        },
+        {
+            "name": "Eppstein",
+            "config": {
+                "transition_tables": false,
+                "find_word": true
+            }
+        },
+        {
+            "name": "Beam",
+            "config": {
+                "presort": "indeg",
+                "beam_size": "10"
+            }
+        },
+        {
+            "name": "Reduce",
+            "config": {
+                "min_n": "80",
+                "list_size_threshold": "AUT_N * 16"
+            }
+        },
+        {
+            "name": "Exact",
+            "config": {
+                "dfs_min_list_size": "10000",
+                "bfs_small_list_size": "AUT_N * 16",
+                "dfs": true,
+                "dfs_shortcut": true,
+                "max_memory_mb": "2 * 1024"
+            }
+        }
+    ]
+}

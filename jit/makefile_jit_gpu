@@ -1,0 +1,25 @@
+CC := g++
+CPPFLAGS := -std=c++17 -Wall -Wno-unused -Wextra -Ofast -flto -s -DNDEBUG -march=native -fPIC -I . -pthread
+LDFLAGS := -shared -pthread
+
+CUDA_INC := -I .
+CUDA_LIB := -lcudart
+NVCCFLAGS := -std=c++14 -I . --use_fast_math --compiler-options -Ofast,-march=native,-s,-DNDEBUG,-fpic
+
+SOURCES := jitmain.cpp $(shell find synchrolib/ -name '*.cpp')
+OBJECTS := $(SOURCES:.cpp=.o)
+TARGET := libsynchro.so
+
+CUDA_SOURCES := $(shell find synchrolib/ -name '*.cu')
+CUDA_OBJECTS := $(CUDA_SOURCES:.cu=.o)
+
+all: $(TARGET)
+
+$(TARGET) : $(OBJECTS) $(CUDA_OBJECTS)
+	$(CC) $(OBJECTS) $(CUDA_OBJECTS) -o $@ $(LDFLAGS) $(CUDA_INC) $(CUDA_LIB)
+
+%.o : %.cu
+	nvcc $(NVCCFLAGS) -c $< -o $@
+
+%.o : %.cpp
+	$(CC) $(CPPFLAGS) -c $< -o $@
