@@ -3,7 +3,7 @@
 Json configuration files specify computational plans.
 A plan describes a sequence of algorithms with their parameters that are run sequentially.
 
-Parameters are either boolean, integer or string.
+Parameters are either boolean, integer, float or string.
 
 Integer and boolean parameters can appear in json as a value of their respective type (e.g. `"find_word": true`)
 or as a string containing a valid C++ expression (e.g. `"find_word": "AUT_N < 1000 * 1000"`).
@@ -20,6 +20,8 @@ Otherwise, the upper bound can be decreased by the algorithms.
 * `threads` (integer) (default `1`) -- Specifies the number of threads for parallel computation.
 
 * `gpu` (boolean) (default `false`) -- Enables gpu. Requies CUDA library and nvcc (see [installation guide](docs/install.md))
+
+* `gpu_max_memory_mb` (integer) (default `2048`) -- Maximum amount of GPU memory in megabytes.
 
 * `algorithms` (list) -- Specifies the list of algorithms that the plan consists of. Algorithms will be run in the given order.
 
@@ -64,6 +66,14 @@ In each iteration, only `beam_size` best sets are kept (valued by their size).
 Though very unlikely for random automata, beam search might run into a loop, especially for small `beam_size`.
 In this case, the algorithm would run for `upper_bound` number of iterations, which might be large if no previous algorithm decreased this bound.
 
+* `dynamic` (boolean) (default `false`) -- Enables the dynamic version of the algorithm.
+
+* `min_beam_size` (integer) (default `AUT_N * std::log2(AUT_N)`) -- Parameter used in the dynamic version.
+
+* `max_beam_size` (integer) (default `AUT_N * AUT_N * std::log2(AUT_N)`) -- Parameter used in the dynamic version.
+
+* `beam_exact_ratio` (float) (default `0.01`) -- Parameter used in the dynamic version.
+
 * `presort` (string) (default `"none"`) -- One of [`"none"`, `"indeg"`].
 If `"indeg"` is specified, the algorithm permutes the indices of the automaton so that they are ordered from lowest to highest in-degree.
 Useful if the implementation uses tries.
@@ -81,7 +91,7 @@ A good upper bound on the shortest reset threshold will decrease the running tim
 
 * `dfs_shortcut` (boolean) (default `true`) -- Enables switching to the DFS phase when the algorithm calculates that it is better. If set to `false`, DFS is only entered after the memory runs out.
 
-* `max_memory_mb` (integer) (default `2048`) -- Maximum amount of used memory in megabytes. If `gpu` is set to true, this limit also applies to the GPU memory.
+* `max_memory_mb` (integer) (default `2048`) -- Maximum amount of used memory in megabytes.
 
 * `dfs_min_list_size` (integer) (default `10000`) -- The minimum size of the list at each depth during the DFS phase.
 

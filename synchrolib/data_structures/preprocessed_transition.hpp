@@ -12,8 +12,7 @@ namespace synchrolib {
 // Must be a power of 2
 constexpr uint PREPROCESSED_TRANSITION_SLICE = 8;
 constexpr uint PREPROCESSED_TRANSITION_NUM_SLICES_FOR_N(uint n) {
-  return (
-      (n + PREPROCESSED_TRANSITION_SLICE - 1) / PREPROCESSED_TRANSITION_SLICE);
+  return ((n + PREPROCESSED_TRANSITION_SLICE - 1) / PREPROCESSED_TRANSITION_SLICE);
 }
 
 template <uint N, uint K>
@@ -21,7 +20,7 @@ struct PreprocessedTransition {
   static constexpr auto NS = PREPROCESSED_TRANSITION_NUM_SLICES_FOR_N;
   static constexpr uint slices() { return NS(N); }
 
-  Subset<N> trans[NS(N)][(1 << PREPROCESSED_TRANSITION_SLICE)];
+  Subset<N> trans[NS(N)][(1U << PREPROCESSED_TRANSITION_SLICE)];
 
   PreprocessedTransition();
   PreprocessedTransition(const Automaton<N, K> &aut, const uint k);
@@ -31,12 +30,21 @@ struct PreprocessedTransition {
 
   __attribute__((hot)) inline void apply(const Subset<N> &from, Subset<N> &s) const {
     for (uint b = 0; b < s.buckets(); b++) s.v[b] = 0;
-    for (uint i = 0; i < slices(); i++) {
+    /*for (uint i = 0; i < slices(); i++) {
       const uint b = i * PREPROCESSED_TRANSITION_SLICE / SUBSETS_BITS;
       const uint shift = i * PREPROCESSED_TRANSITION_SLICE % SUBSETS_BITS;
       const uint set = (uint)(
-          (from.v[b] >> (shift)) & ((1 << PREPROCESSED_TRANSITION_SLICE) - 1));
+          (from.v[b] >> (shift)) & ((1U << PREPROCESSED_TRANSITION_SLICE) - 1U));
       s |= trans[i][set];
+    }
+    */
+    for (uint bucket = 0, slice = 0; ; ++bucket) {
+      for (uint shift = 0; shift < SUBSETS_BITS; shift += PREPROCESSED_TRANSITION_SLICE) {
+        const uint set = (uint)(
+            (from.v[bucket] >> (shift)) & ((1U << PREPROCESSED_TRANSITION_SLICE) - 1U));
+        s |= trans[slice][set];
+        if (++slice == slices()) return;
+      }
     }
   }
 };

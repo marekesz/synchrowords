@@ -211,8 +211,13 @@ private:
       list_bfs_visited.push_back(sub);
     }
 
-    auto ret = SubsetsImplicitTrie<N, false, THREADS>::check_contains_subset(list_bfs, singletons);
-    return std::any_of(ret.begin(), ret.end(), [](bool x) { return x; });
+    for (const auto& sub : list_bfs) {
+      if (sub.size() == 1)
+        return true;
+    }
+    return false;
+    //auto ret = SubsetsImplicitTrie<N, false, THREADS>::check_contains_subset(list_bfs, singletons);
+    //return std::any_of(ret.begin(), ret.end(), [](bool x) { return x; });
   }
 
   static FastVector<FastVector<bool>> to_vector(

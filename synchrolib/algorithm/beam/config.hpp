@@ -24,6 +24,11 @@ private:
     std::string ret;
     ret += make_define("BEAM_SIZE", get_str_int(config, "beam_size", "std::log2(AUT_N)"));
 
+    ret += make_define("DYNAMIC", get_str_bool(config, "dynamic", "false"));
+    ret += make_define("MIN_BEAM_SIZE", get_str_int(config, "min_beam_size", "AUT_N * std::log2(AUT_N)"));
+    ret += make_define("MAX_BEAM_SIZE", get_str_int(config, "max_beam_size", "AUT_N * AUT_N * std::log2(AUT_N)"));
+    ret += make_define("BEAM_EXACT_RATIO", get_str_float(config, "beam_exact_ratio", "0.01"));
+
     ret += make_define("MAX_ITER", get_str_int(config, "max_iter", "-1"));
 
     auto presort = config.value("presort", "none");

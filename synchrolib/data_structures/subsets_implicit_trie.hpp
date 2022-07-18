@@ -21,13 +21,12 @@
 
 namespace synchrolib {
 
-template <uint N, bool Proper=false, uint Threads=1, bool SortUniqueDone=false>
+template <uint N, bool Proper=false, uint Threads=1, bool SortUniqueDone=false, bool ThreadShuffle=false>
 class SubsetsImplicitTrie {
 public:
-  // using Bitset = FastVector<bool>;
-  using Bitset = std::vector<bool>; // TODO: change to FastVector (and check memory)
+  using Iterator = typename FastVector<Subset<N>>::iterator;
 
-  static Bitset check_contains_subset(FastVector<Subset<N>>& set, FastVector<Subset<N>>& check) {
+  static Iterator check_contains_subset(FastVector<Subset<N>>& set, FastVector<Subset<N>>& check) {
     if constexpr (!SortUniqueDone) {
       sort_keep_unique(set);
       sort_keep_unique(check);
@@ -36,7 +35,11 @@ public:
     if constexpr (Threads == 1 || (GPU && (THREADS == 1))) {
       return check_contains_subset_singlethreaded(set, check);
     } else {
-      return check_contains_subset_multithreaded(set, check);
+      if (std::max(set.size(), check.size()) < 256) {
+        return check_contains_subset_singlethreaded(set, check);
+      } else {
+        return check_contains_subset_multithreaded(set, check);
+      }
     }
   }
 
@@ -48,26 +51,16 @@ public:
     if (set.empty()) return;
 
     auto cpy = set; // TODO: somehow opt memory?
-    auto remove = check_contains_subset(cpy, set);
-    for (int i = static_cast<int>(set.size()) - 1; i >= 0; --i) { // TODO: remove_if
-      if (remove[i]) {
-        std::swap(set.back(), set[i]);
-        set.pop_back();
-      }
-    }
+    auto it = check_contains_subset(cpy, set);
+    set.resize(std::distance(set.begin(), it));
   }
 
   static void reduce(FastVector<Subset<N>>& set, FastVector<Subset<N>>& vec) {
     Timer timer("reduce two");
     if (vec.empty()) return;
 
-    auto remove = check_contains_subset(set, vec);
-    for (int i = static_cast<int>(vec.size()) - 1; i >= 0; --i) {
-      if (remove[i]) {
-        std::swap(vec.back(), vec[i]);
-        vec.pop_back();
-      }
-    }
+    auto it = check_contains_subset(set, vec);
+    vec.resize(std::distance(vec.begin(), it));
   }
 
 private:
@@ -77,69 +70,65 @@ private:
   static constexpr uint M = 6;
 #endif
 
-  using Iterator = typename FastVector<Subset<N>>::iterator;
-
-  Bitset ret;
 #if (GPU && (THREADS == 1))
   SubsetsImplicitTrieKernel<N, Proper> kernel;
   Iterator first_set;
+  FastVector<bool> kernel_ans;
 #endif
 
-  static Bitset check_contains_subset_singlethreaded(FastVector<Subset<N>>& set, FastVector<Subset<N>>& check) {
+  static Iterator check_contains_subset_singlethreaded(FastVector<Subset<N>>& set, FastVector<Subset<N>>& check) {
     SubsetsImplicitTrie trie;
-    trie.ret = Bitset(check.size());
 #if (GPU && (THREADS == 1))
       trie.kernel.allocate(set.data(), set.size(), check.size());
       trie.first_set = set.begin();
 #endif
-    trie.check_contains_subset_impl(0, 0, set.begin(), set.end(), check.begin(), check.end());
-    return trie.ret;
+    auto it = check.end();
+    trie.check_contains_subset_impl(0, set.begin(), set.end(), check.begin(), it);
+    return it;
   }
 
-  static Bitset check_contains_subset_multithreaded(FastVector<Subset<N>>& set, FastVector<Subset<N>>& check) {
-    Bitset ret(check.size());
-
+  static Iterator check_contains_subset_multithreaded(FastVector<Subset<N>>& set, FastVector<Subset<N>>& check) {
     using Range = std::pair<size_t, size_t>;
     size_t set_cnt = std::distance(set.begin(), set.end());
     size_t check_cnt = std::distance(check.begin(), check.end());
 
     std::array<std::tuple<Range, size_t>, Threads> split;
+    std::array<std::pair<Iterator, Iterator>, Threads> ret;
     for (size_t t = 0; t < Threads; ++t) {
       split[t] = {
         {t * check_cnt / Threads, (t + 1) * check_cnt / Threads}, t
       };
     }
 
-    std::mutex write_mutex;
+    if constexpr (ThreadShuffle) {
+      std::random_shuffle(check.begin(), check.end());
+    }
 
     static FastVector<std::thread> threads;
     for (size_t t = 0; t < Threads; ++t) {
       threads.push_back(std::thread([] (
+          uint t,
           std::tuple<Range, size_t> ranges,
-          std::mutex& write_mutex,
-          Bitset& ret,
+          std::array<std::pair<Iterator, Iterator>, Threads>& ret,
           FastVector<Subset<N>>& set,
           FastVector<Subset<N>>& check) {
 
         SubsetsImplicitTrie trie;
-        trie.ret = Bitset(std::get<0>(ranges).second - std::get<0>(ranges).first);
-#if (GPU && (THREADS == 1))
-        trie.kernel.allocate(set.data(), set.size(), std::get<0>(ranges).second - std::get<0>(ranges).first);
-        trie.first_set = set.begin();
-#endif
+        auto begin = check.begin() + std::get<0>(ranges).first;
+        auto end = check.begin() + std::get<0>(ranges).second;
+        auto it = end;
+        if constexpr (ThreadShuffle) {
+          std::sort(begin, end);
+        }
         trie.check_contains_subset_impl(
-            0,
             0,
             set.begin(),
             set.end(),
-            check.begin() + std::get<0>(ranges).first,
-            check.begin() + std::get<0>(ranges).second);
+            begin,
+            it);
 
-        const std::lock_guard<std::mutex> lock(write_mutex);
-        for (size_t i = std::get<0>(ranges).first; i < std::get<0>(ranges).second; ++i) {
-          ret[i] = ret[i] || trie.ret[i - std::get<0>(ranges).first];
-        }
-      }, split[t], std::ref(write_mutex), std::ref(ret), std::ref(set), std::ref(check)));
+        ret[t] = {begin, it};
+      }, t, split[t], std::ref(ret), std::ref(set), std::ref(check)));
     }
 
     for(auto& thread : threads) {
@@ -147,7 +136,15 @@ private:
     }
     threads.clear();
 
-    return ret;
+    auto it = check.begin();
+    for (size_t t = 0; t < Threads; ++t) {
+      if (ret[t].first != it) {
+        it = std::copy(ret[t].first, ret[t].second, it);
+      } else {
+        it = ret[t].second;
+      }
+    }
+    return it;
   }
 
   // binary search first subset with <depth> bit set to one
@@ -166,7 +163,7 @@ private:
   }
 
   // it's important that there are no duplicates between begin and end
-  void check_contains_subset_impl(uint depth, uint ret_pos, Iterator set_begin, Iterator set_end, Iterator check_begin, Iterator check_end) {
+  void check_contains_subset_impl(uint depth, Iterator set_begin, Iterator set_end, Iterator check_begin, Iterator& check_end) {
     if (set_begin == set_end || check_begin == check_end) return;
 
     uint set_count = std::distance(set_begin, set_end);
@@ -174,38 +171,44 @@ private:
 
     if (set_count <= M) { // true for sure if depth == N
 #if (GPU && (THREADS == 1))
-      Timer timer("gpu");
+      // Timer timer("gpu");
       // bool show = (std::rand()%50) == 0;
       // bool show = true;
       // if (show) std::cout << set_count << " " << check_count;
-      bool* ans = new bool[check_count];
+      kernel_ans.resize(check_count);
       kernel.run(
         std::distance(first_set, set_begin),
         set_count,
         std::addressof(*check_begin),
         check_count,
-        ans);
-      uint cnt = 0;
-      for (uint i = 0; i < check_count; ++i) {
-        if (ans[i]) {
-          cnt++;
-          ret[ret_pos + i] = true;
+        kernel_ans.data());
+      auto it = check_end;
+      for (int i = static_cast<int>(check_count) - 1; i >= 0; --i) {
+        --it;
+        if (kernel_ans[i]) {
+          --check_end;
+          std::swap(*it, *check_end);
         }
       }
       // if (show) std::cout << " | " << cnt << std::endl;
-      delete[] ans;
-      timer.template stop<false>();
+      // timer.template stop<false>();
 #else
       for (auto set = set_begin; set != set_end; ++set) {
         auto it = check_begin;
-        for (uint i = 0; i < check_count; ++i, ++it) {
+        while (it != check_end) {
           if constexpr (Proper) {
             if (it->is_proper_subset(*set)) {
-              ret[ret_pos + i] = true;
+              --check_end;
+              std::swap(*it, *check_end);
+            } else {
+              ++it;
             }
           } else {
             if (it->is_subset(*set)) {
-              ret[ret_pos + i] = true;
+              --check_end;
+              std::swap(*it, *check_end);
+            } else {
+              ++it;
             }
           }
         }
@@ -214,75 +217,51 @@ private:
       return;
     }
 
+    if (check_begin == check_end) {
+      return;
+    }
+
     auto set_lo = binsearch_first_one(set_begin, depth, set_count);
 
     if (set_begin != set_lo) {
       check_contains_subset_impl(
         depth + 1,
-        ret_pos,
         set_begin,
         set_lo,
         check_begin,
         check_end);
     }
 
-    if (set_lo == set_end) {
+    if (set_lo == set_end || check_begin == check_end) {
       return;
     }
-
-    // deleting already marked elements
-    // ================================
-    // size_t pos = ret_pos;
-    // for (auto it = check_begin; it != check_end; ++it, ++pos) {
-    //   if (ret[pos]) {
-    //     if (it == check_begin) {
-    //       check_begin++;
-    //       ret_pos++;
-    //     } else {
-    //       std::swap(*it, *check_begin);
-    //       check_begin++;
-    //       ret[ret_pos] = true;
-    //       ret[pos] = false;
-    //       ret_pos++;
-    //     }
-    //   }
-    // }
-    // if (check_begin == check_end) {
-    //   return;
-    // }
-    // ================================
 
     auto lo = check_begin;
     auto hi = std::prev(check_end);
     while (true) {
-      while (lo < hi && !hi->is_set(depth)) {
+      while (lo < hi && hi->is_set(depth)) {
         hi--;
       }
-      while (lo < hi && lo->is_set(depth)) {
+      while (lo < hi && !lo->is_set(depth)) {
         lo++;
       }
       if (lo < hi) {
         std::swap(*lo, *hi);
-        bool a = ret[ret_pos + std::distance(check_begin, lo)];
-        bool b = ret[ret_pos + std::distance(check_begin, hi)];
-        ret[ret_pos + std::distance(check_begin, lo)] = b;
-        ret[ret_pos + std::distance(check_begin, hi)] = a;
         lo++;
         hi--;
       } else {
         break;
       }
     }
-    if (lo->is_set(depth)) lo++; // lo is the first element with bit set to zero (or end)
+    if (!lo->is_set(depth)) lo++; // lo is the first element with bit set to one (or end)
 
-    if (check_begin != lo) {
+    if (lo != check_end) {
       check_contains_subset_impl(
         depth + 1,
-        ret_pos,
         set_lo,
         set_end,
-        check_begin,
-        lo);
+        lo,
+        check_end);
     }
   }
 };

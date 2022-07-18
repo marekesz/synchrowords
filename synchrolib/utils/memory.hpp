@@ -15,9 +15,9 @@ inline std::string get_megabytes(size_t mem, int precision = 0) {
   return ss.str();
 }
 
-template <typename T, typename A>
-size_t get_memory_usage_impl(const FastVector<T, A>& vec) {
-  return vec.capacity() * sizeof(T);
+template <typename T>
+size_t get_memory_usage_impl(const FastVector<T>& vec) {
+  return vec.size() * sizeof(T);
 }
 
 template <typename T, size_t N>

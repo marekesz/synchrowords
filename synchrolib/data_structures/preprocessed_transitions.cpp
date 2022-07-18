@@ -5,6 +5,7 @@
 #include <synchrolib/utils/bits.hpp>
 #include <synchrolib/utils/general.hpp>
 #include <synchrolib/utils/memory.hpp>
+#include <synchrolib/utils/thread_pool.hpp>
 
 #if GPU
 #include <synchrolib/data_structures/cuda/preprocessed_transition_kernel.hpp>
@@ -67,8 +68,27 @@ void PreprocessedTransition<N, K>::apply(const Subset<N>* from, Subset<N>* to, s
     cnt -= now;
   }
 #else
-  for (size_t i = 0; i < cnt; ++i, ++from, ++to) {
-    apply(*from, *to);
+  if (THREADS > 1 && cnt > 256) {
+    ThreadPool pool;
+    pool.start(THREADS);
+    for (size_t t = 0; t < THREADS; ++t) {
+      auto it = from + (cnt * t / THREADS);
+      auto end = from + (cnt * (t + 1) / THREADS);
+      auto out = to + (cnt * t / THREADS);
+
+      pool.add_job([this, it, end, out] () mutable {
+        while (it != end) {
+          this->apply(*it, *out);
+          ++it;
+          ++out;
+        }
+      });
+    }
+    pool.wait();
+  } else {
+    for (size_t i = 0; i < cnt; ++i, ++from, ++to) {
+      apply(*from, *to);
+    }
   }
 #endif
 }

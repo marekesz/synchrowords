@@ -1,25 +1,27 @@
 #pragma once
 
 #include <limits>
-#include "memory.hpp"
+#include <type_traits>
+
+#include "types.hpp"
 
 namespace uwr::mem {
 
-template<len_t C>
+template<uwr::u64 C>
 struct minimal_size_type {
-    using type = typename std::conditional_t<
-                    C <= std::numeric_limits<std::uint_fast8_t>::max(),
-                    std::uint_fast8_t,
-                    typename std::conditional_t<
-                        C <= std::numeric_limits<std::uint_fast16_t>::max(),
-                        std::uint_fast16_t,
-                        std::conditional_t<
-                            C <= std::numeric_limits<std::uint_fast32_t>::max(),
-                            std::uint_fast32_t,
-                            std::uint_fast64_t
-                        >
-                    >
-                >;
+   using type = typename std::conditional_t<
+      C <= std::numeric_limits<uwr::u8>::max(),
+      uwr::u8,
+      typename std::conditional_t<
+         C <= std::numeric_limits<uwr::u16>::max(),
+         uwr::u16,
+         std::conditional_t<
+            C <= std::numeric_limits<uwr::u32>::max(),
+            uwr::u32,
+            uwr::u64
+         >
+      >
+   >;
 };
 
 } // namespace uwr::mem

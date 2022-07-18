@@ -21,17 +21,43 @@ int main(int argc, char** argv) {
   auto auts_encoded = IO::read_automata(args.input_path);
   auto config = IO::read_config(args.config_path);
 
+  size_t skip = 0;
   if (args.output_path) {
-    IO::set_output(std::ofstream(*args.output_path));
+    std::ofstream os;
+    if (args.cont) {
+      std::ifstream is(*args.output_path);
+      if (is) {
+        skip = IO::count_nonempty_lines(is);
+      }
+      os = std::ofstream(*args.output_path, std::ios_base::app);
+    } else {
+      os = std::ofstream(*args.output_path);
+    }
+
+    if (!os) {
+      Logger::error() << "Error while opening the output file";
+      std::exit(1);
+    }
+    IO::set_output(std::move(os));
   }
 
+  if (skip) {
+    Logger::info() << "Skipping " << skip << " automata";
+  }
+
+  size_t index = 0;
   for (const auto& aut : auts_encoded) {
+    if (index < skip) {
+      index++;
+      continue;
+    }
+
     Jit::AlgoResult result;
     uint cur_n = aut.N;
     uint cur_k = aut.K;
     std::string cur_aut = aut.str;
 
-    while (!Jit::run(config, cur_n, cur_k, cur_aut, result)) {
+    while (!Jit::run(config, cur_n, cur_k, cur_aut, args.build_suffix, result)) {
       if (result.reduce && !result.reduce->done) {
         cur_n = result.reduce->aut.N;
         cur_k = result.reduce->aut.K;
@@ -48,7 +74,7 @@ int main(int argc, char** argv) {
                       << result.mlsw_lower_bound << ", "
                       << result.mlsw_upper_bound << "]";
     }
-    IO::push_result(result);
+    IO::push_result(result, index++);
   }
 
   return 0;

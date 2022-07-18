@@ -87,10 +87,10 @@ bool MeetInTheMiddle<N, K>::run() {
       else process_invbfs_step();
 
       Timer goal_check("goal_check");
-      auto ret = SubsetsImplicitTrie<N, false, THREADS>::check_contains_subset(list_bfs, list_invbfs);
+      auto it = SubsetsImplicitTrie<N, false, THREADS>::check_contains_subset(list_bfs, list_invbfs);
       goal_check.stop();
 
-      if (std::any_of(ret.begin(), ret.end(), [](bool x) { return x; })) {
+      if (it != list_invbfs.end()) {
         Logger::verbose() << "Synchronizing word found at depth " << reset_threshold;
         found = true;
         break;
@@ -102,7 +102,7 @@ bool MeetInTheMiddle<N, K>::run() {
     }
   }
 
-  list_bfs_visited = list_invbfs_visited = FastVector<Subset<N>>();
+  list_bfs_visited = list_invbfs_visited = FastVector<Subset<N>>(); // TODO: uwr vector UB
   return found;
 }
 
@@ -280,7 +280,7 @@ void MeetInTheMiddle<N, K>::invbfs_step(
       }
       throw OutOfMemoryException();
     }
-    SubsetsImplicitTrie<N, true, THREADS, true>::reduce(list_invbfs);
+    SubsetsImplicitTrie<N, true, THREADS, true, true>::reduce(list_invbfs);
     invbfs_reduction_history.reduced_self = reduced_self.calculate(list_invbfs.size());
 
     for (auto& sub : list_invbfs) {
@@ -308,13 +308,13 @@ void MeetInTheMiddle<N, K>::invbfs_step(
       }
       throw OutOfMemoryException();
     }
-    SubsetsImplicitTrie<N, true, THREADS, true>::reduce(list_invbfs);
+    SubsetsImplicitTrie<N, true, THREADS, true, true>::reduce(list_invbfs);
     invbfs_reduction_history.reduced_self = reduced_self.calculate(list_invbfs.size());
     std::sort(list_invbfs.begin(), list_invbfs.end());
 
 
     ReductionCalculator reduced_visited(list_invbfs.size());
-    SubsetsImplicitTrie<N, false, THREADS, true>::reduce(list_invbfs_visited, list_invbfs);
+    SubsetsImplicitTrie<N, false, THREADS, true, true>::reduce(list_invbfs_visited, list_invbfs);
     invbfs_reduction_history.reduced_visited = reduced_visited.calculate(list_invbfs.size());
 
     std::sort(list_invbfs.begin(), list_invbfs.end());
@@ -345,14 +345,18 @@ void MeetInTheMiddle<N, K>::invbfs_step(
 
 template<uint N, uint K>
 void MeetInTheMiddle<N, K>::calculate_decision() {
-  constexpr cost_t DFS_COST_WEIGHT = 0.25;
+  constexpr cost_t SET_COST = 512;
+  constexpr cost_t ASSUMED_MIN_REDUCTION_VISITED = 0.001;
+  constexpr cost_t DFS_CHECK_COST_WEIGHT = 0.25;
+  constexpr cost_t DFS_SET_COST_WEIGHT = 0.25;
+  constexpr cost_t DFS_REDUCTION_OF_REDUCTION = 1.0 / K;
 
   // Trivial decision if small lists
-  if (list_bfs.size() <= BFS_SMALL_LIST_SIZE || list_invbfs.size() <= BFS_SMALL_LIST_SIZE || !steps_bfs || !steps_invbfs) {
+  if (list_bfs.size() <= BFS_SMALL_LIST_SIZE || list_invbfs.size() <= BFS_SMALL_LIST_SIZE || steps_bfs == 0 || steps_invbfs == 0) {
     decision.phase = (list_bfs.size() <= list_invbfs.size() ? Decision::Phase::BFS : Decision::Phase::IBFS);
     return;
   }
-
+  
   const uint64 card_list_bfs = get_cardinalities(list_bfs);
   const uint64 card_list_invbfs = get_cardinalities(list_invbfs);
   const uint64 card_trie_visited_bfs = get_cardinalities(list_bfs_visited);
@@ -360,10 +364,13 @@ void MeetInTheMiddle<N, K>::calculate_decision() {
   const cost_t density_list_bfs = static_cast<cost_t>(card_list_bfs) / (N * list_bfs.size());
   const cost_t density_list_invbfs = static_cast<cost_t>(card_list_invbfs) / (N * list_invbfs.size());
 
-  cost_t cost_bfs, cost_invbfs, cost_shortcut, cost_noshortcut;
+  if (bfs_reduction_history.reduced_visited < ASSUMED_MIN_REDUCTION_VISITED) bfs_reduction_history.reduced_visited = ASSUMED_MIN_REDUCTION_VISITED;
+  if (invbfs_reduction_history.reduced_visited < ASSUMED_MIN_REDUCTION_VISITED) invbfs_reduction_history.reduced_visited = ASSUMED_MIN_REDUCTION_VISITED;
+
 
   /*
   // Formulas without reduction history
+  // cost_t cost_bfs, cost_invbfs, cost_shortcut, cost_noshortcut;
   // Separate reductions:
   //cost_bfs = K * list_bfs.size() * get_trie_evn(list_bfs_visited.size(), density_list_bfs, static_cast<cost_t>(card_trie_visited_bfs) / (N * list_bfs_visited.size()));
   //cost_bfs += K * list_bfs.size() * get_trie_evn(K * list_bfs.size(), density_list_bfs, density_list_bfs);
@@ -395,31 +402,35 @@ void MeetInTheMiddle<N, K>::calculate_decision() {
   */
 
   // Step costs
-
+  
   cost_t branching_bfs_visited = K * (1.0 - bfs_reduction_history.reduced_duplicates);
-  cost_t cost_bfs_visited = branching_bfs_visited * list_bfs.size() * get_trie_evn(branching_bfs_visited * list_bfs.size() + list_bfs_visited.size(), density_list_bfs,
+  cost_t cost_bfs_visited = SET_COST * K * list_bfs.size();
+  cost_bfs_visited += branching_bfs_visited * list_bfs.size() * get_trie_evn(branching_bfs_visited * list_bfs.size() + list_bfs_visited.size(), density_list_bfs,
       static_cast<cost_t>(branching_bfs_visited * card_list_bfs + card_trie_visited_bfs) / (N * (branching_bfs_visited * list_bfs.size() + list_bfs_visited.size())));
   branching_bfs_visited *= (1.0-bfs_reduction_history.reduced_visited);
   cost_bfs_visited += list_invbfs.size() * get_trie_evn(branching_bfs_visited * list_bfs.size(), density_list_invbfs, density_list_bfs);
+  
+  cost_t branching_bfs_novisited = K * (1.0 - bfs_reduction_history.reduced_duplicates);
+  cost_t cost_bfs_novisited = SET_COST * K * list_bfs.size();
+  cost_bfs_novisited += branching_bfs_novisited * list_bfs.size() * get_trie_evn(branching_bfs_novisited * list_bfs.size(), density_list_bfs, static_cast<cost_t>(branching_bfs_novisited * card_list_bfs) / (N * (branching_bfs_novisited * list_bfs.size())));
+  if (decision.bfs_novisited) branching_bfs_novisited *= (1.0 - bfs_reduction_history.reduced_visited); // TODO: use reduced_self instead of visited
+  cost_bfs_novisited += list_invbfs.size() * get_trie_evn(branching_bfs_novisited * list_bfs.size(), density_list_invbfs, density_list_bfs);
 
   cost_t branching_invbfs_visited = K * (1.0 - invbfs_reduction_history.reduced_duplicates);
-  cost_t cost_invbfs_visited = branching_invbfs_visited * list_invbfs.size() * get_trie_evn(branching_invbfs_visited * list_invbfs.size(), 1.0 - density_list_invbfs, 1.0 - density_list_invbfs);
+  cost_t cost_invbfs_visited = SET_COST * K * list_invbfs.size();
+  cost_invbfs_visited += branching_invbfs_visited * list_invbfs.size() * get_trie_evn(branching_invbfs_visited * list_invbfs.size(), 1.0 - density_list_invbfs, 1.0 - density_list_invbfs);
   branching_invbfs_visited *= (1.0 - invbfs_reduction_history.reduced_self);
   cost_invbfs_visited += branching_invbfs_visited * list_invbfs.size() * get_trie_evn(list_invbfs_visited.size(), 1.0 - density_list_invbfs, 1.0 - static_cast<cost_t>(card_trie_visited_invbfs) / (N * list_invbfs_visited.size()));
   branching_invbfs_visited *= (1.0 - invbfs_reduction_history.reduced_visited);
   cost_invbfs_visited += branching_invbfs_visited * list_invbfs.size() * get_trie_evn(list_bfs.size(), density_list_invbfs, density_list_bfs);
 
-  cost_t branching_bfs_novisited = K * (1.0 - bfs_reduction_history.reduced_duplicates);
-  cost_t cost_bfs_novisited = branching_bfs_novisited * list_bfs.size() * get_trie_evn(branching_bfs_novisited * list_bfs.size(), density_list_bfs, static_cast<cost_t>(branching_bfs_novisited * card_list_bfs) / (N * (branching_bfs_novisited * list_bfs.size())));
-  if (decision.bfs_novisited) branching_bfs_novisited *= (1.0 - bfs_reduction_history.reduced_visited); // TODO: use reduced_self instead of visited
-  cost_bfs_novisited += list_invbfs.size() * get_trie_evn(branching_bfs_novisited * list_bfs.size(), density_list_invbfs, density_list_bfs);
-
   cost_t branching_invbfs_novisited = K * (1.0 - invbfs_reduction_history.reduced_duplicates);
-  cost_t cost_invbfs_novisited = branching_invbfs_novisited * list_invbfs.size() * get_trie_evn(branching_invbfs_novisited * list_invbfs.size(), 1.0 - density_list_invbfs, 1.0 - density_list_invbfs);
+  cost_t cost_invbfs_novisited = SET_COST * K * list_invbfs.size();
+  cost_invbfs_novisited += branching_invbfs_novisited * list_invbfs.size() * get_trie_evn(branching_invbfs_novisited * list_invbfs.size(), 1.0 - density_list_invbfs, 1.0 - density_list_invbfs);
   branching_invbfs_novisited *= (1.0 - invbfs_reduction_history.reduced_self);
   cost_invbfs_novisited += branching_invbfs_novisited * list_invbfs.size() * get_trie_evn(list_bfs.size(), density_list_invbfs, density_list_bfs);
 
-  int inf_cnt = 0;
+  uint inf_cnt = 0;
   if (decision.bfs_novisited ||
       get_memory_usage() + synchrolib::get_memory_usage(list_bfs_visited) > max_memory || // reduce
       get_memory_usage() + 2 * sizeof(Subset<N>) * list_bfs.size() * K > max_memory ||    // next list x 2
@@ -448,36 +459,37 @@ void MeetInTheMiddle<N, K>::calculate_decision() {
     inf_cnt++;
   }
 
-  cost_t branching_invdfs = K * (1.0-invbfs_reduction_history.reduced_duplicates);
-  uint64 remaining_iterations = max_reset_threshold - reset_threshold;
-
   Logger::debug() << "Costs: bfs_visited: " << cost_bfs_visited << " bfs_novisited: " << cost_bfs_novisited << " invbfs_visited: " << cost_invbfs_visited << " invbfs_novisited: " << cost_invbfs_novisited;
 
   // Predictions
 
+  cost_t branching_invdfs = std::max(K * (1.0 - invbfs_reduction_history.reduced_duplicates * DFS_REDUCTION_OF_REDUCTION), static_cast<cost_t>(1.0));
+  uint64 remaining_iterations = max_reset_threshold - reset_threshold;
+  
   auto get_dfs_total_factor = [&](const uint depth) {
     return branching_invdfs * (std::pow(branching_invdfs, depth) - 1.0) / (branching_invdfs - 1.0);
   };
-
+  const cost_t dfs_subset_cost = SET_COST * DFS_SET_COST_WEIGHT * K / branching_invdfs; // Including reduced duplicates
+  
   cost_t prediction_bfs_visited = cost_bfs_visited +
-      DFS_COST_WEIGHT * list_invbfs.size() * get_dfs_total_factor(remaining_iterations - 1) *
-      get_trie_evn(branching_bfs_visited * list_bfs.size(), density_list_invbfs, density_list_bfs);
-
-  cost_t prediction_invbfs_visited = cost_invbfs_visited +
-      DFS_COST_WEIGHT * branching_invbfs_visited * list_invbfs.size() * get_dfs_total_factor(remaining_iterations - 1) *
-      get_trie_evn(list_bfs.size(), density_list_invbfs, density_list_bfs);
-
+      list_invbfs.size() * get_dfs_total_factor(remaining_iterations - 1) *
+      (dfs_subset_cost + DFS_CHECK_COST_WEIGHT * get_trie_evn(branching_bfs_visited * list_bfs.size(), density_list_invbfs, density_list_bfs));
+  
   cost_t prediction_bfs_novisited = cost_bfs_novisited +
-      DFS_COST_WEIGHT * list_invbfs.size() * get_dfs_total_factor(remaining_iterations - 1) *
-      get_trie_evn(branching_bfs_novisited * list_bfs.size(), density_list_invbfs, density_list_bfs);
-
+      list_invbfs.size() * get_dfs_total_factor(remaining_iterations - 1) *
+      (dfs_subset_cost + DFS_CHECK_COST_WEIGHT * get_trie_evn(branching_bfs_novisited * list_bfs.size(), density_list_invbfs, density_list_bfs));
+  
+  cost_t prediction_invbfs_visited = cost_invbfs_visited +
+      branching_invbfs_visited * list_invbfs.size() * get_dfs_total_factor(remaining_iterations - 1) *
+      (dfs_subset_cost + DFS_CHECK_COST_WEIGHT * get_trie_evn(list_bfs.size(), density_list_invbfs, density_list_bfs));
+  
   cost_t prediction_invbfs_novisited = cost_invbfs_novisited +
-      DFS_COST_WEIGHT * branching_invbfs_novisited * list_invbfs.size() * get_dfs_total_factor(remaining_iterations - 1) *
-      get_trie_evn(list_bfs.size(), density_list_invbfs, density_list_bfs);
-
+      branching_invbfs_novisited * list_invbfs.size() * get_dfs_total_factor(remaining_iterations - 1) *
+      (dfs_subset_cost + DFS_CHECK_COST_WEIGHT * get_trie_evn(list_bfs.size(), density_list_invbfs, density_list_bfs));
+  
   cost_t prediction_invdfs =
-      DFS_COST_WEIGHT * list_invbfs.size() * get_dfs_total_factor(remaining_iterations) *
-      get_trie_evn(list_bfs.size(), density_list_invbfs, density_list_bfs);
+      list_invbfs.size() * get_dfs_total_factor(remaining_iterations) *
+      (dfs_subset_cost + DFS_CHECK_COST_WEIGHT * get_trie_evn(list_bfs.size(), density_list_invbfs, density_list_bfs));
 
   Logger::debug() << "bfs_visited: " << prediction_bfs_visited << " bfs_novisited: " << prediction_bfs_novisited << " invbfs_visited: " << prediction_invbfs_visited << " invbfs_novisited: " << prediction_invbfs_novisited << " invdfs: " << prediction_invdfs;
 
@@ -491,14 +503,15 @@ void MeetInTheMiddle<N, K>::calculate_decision() {
 
   Logger::debug() << "BFS steps: " << steps_bfs << " IBFS steps: " << steps_invbfs;
 #if DFS_SHORTCUT
-  if (last_bfs_list_size < list_bfs.size() && last_invbfs_list_size < list_invbfs.size() && prediction_invdfs < minimum) {
+  if (prediction_invdfs < minimum) {
+//  if (last_bfs_list_size < list_bfs.size() && last_invbfs_list_size < list_invbfs.size() && prediction_invdfs < minimum) { // Disabled, since we have reduction estimation
     Logger::verbose() << "Ended by shortcut (inf " << inf_cnt << "/4)";
     decision.phase = Decision::Phase::IDFS;
     return;
   }
 #endif
 
-  if (prediction_bfs_visited <= prediction_bfs_novisited && prediction_invbfs_visited <= prediction_invbfs_novisited) {
+  if (prediction_bfs_visited < prediction_bfs_novisited && prediction_invbfs_visited < prediction_invbfs_novisited) {
     // If we do not consider novisited, then we choose greedily the cheaper step
     decision.phase = (cost_invbfs_visited < cost_bfs_visited ? Decision::Phase::IBFS : Decision::Phase::BFS);
     if (decision.phase == Decision::Phase::IBFS) Logger::debug() << "Decision: IBFS (greedy)"; else Logger::debug() << "Decision: BFS (greedy)"; 

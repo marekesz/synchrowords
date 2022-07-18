@@ -14,7 +14,7 @@ public:
   using Path = std::filesystem::path;
   using AlgoResult = synchrolib::AlgoResult;
 
-  static bool run(const IO::json& config, uint n, uint k, const std::string& aut, AlgoResult& result) {
+  static bool run(const IO::json& config, uint n, uint k, const std::string& aut, const std::string& build_suffix, AlgoResult& result) {
     try {
       if (config["algorithms"].empty()) {
         Logger::error() << "Need at least one algorithm";
@@ -23,8 +23,11 @@ public:
       auto algorithms = get_algorithm_names(config);
 
       auto config_hash = std::to_string(std::hash<std::string>{}(config.dump()));
-      Path libroot = Path("build") /
-        ("synchrolib_" + std::to_string(n) + "_" + std::to_string(k) + "_" + config_hash);
+      auto build_name = "synchrolib_" + std::to_string(n) + "_" + std::to_string(k) + "_" + config_hash;
+      if (!build_suffix.empty()) {
+        build_name += "_" + build_suffix;
+      }
+      Path libroot = Path("build") / build_name;
 
       try {
         Timer jitlib_timer("jit");
@@ -73,7 +76,7 @@ public:
         std::exit(4);
       }
 
-      return result.algorithms_run == algorithms.size();
+      return result.algorithms_run.size() == algorithms.size();
     } catch (nlohmann::detail::exception& json_error) {
       Logger::error() << "Config exception: " << json_error.what();
       std::exit(4);

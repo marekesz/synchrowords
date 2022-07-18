@@ -11,6 +11,7 @@
 #include <synchrolib/data_structures/preprocessed_transition.hpp>
 #include <synchrolib/data_structures/subset.hpp>
 #include <synchrolib/data_structures/subset_utils.hpp>
+#include <synchrolib/utils/thread_pool.hpp>
 #include <synchrolib/utils/vector.hpp>
 #include <synchrolib/data_structures/subsets_trie.hpp>
 #include <synchrolib/data_structures/subsets_implicit_trie.hpp>
@@ -19,6 +20,7 @@
 #include <synchrolib/utils/general.hpp>
 #include <synchrolib/utils/logger.hpp>
 #include <synchrolib/utils/timer.hpp>
+#include <thread>
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -52,6 +54,7 @@ Dfs<N, K>::Dfs(
   invptrans(invptrans),
   reset_threshold(reset_threshold),
   list_bfs(list_bfs),
+  list_bfs_size(list_bfs.size()),
   list_invbfs(list_invbfs),
   max_depth(max_depth),
   max_memory(max_memory) {
@@ -129,6 +132,11 @@ void Dfs<N, K>::prepare() {
   Logger::verbose() << "Permuting the automaton";
   auto order = get_order();
 
+  uint64 card_list = 0;
+  for (auto &s: list_bfs) card_list += s.size();
+  density_bfs = static_cast<cost_t>(card_list) / (N * list_bfs.size());
+  Logger::debug() << "density_bfs " << density_bfs;
+    
   for (auto& item : list_bfs) {
     item = Subset<N>::Permutation(item, order);
   }
@@ -210,6 +218,14 @@ void Dfs<N, K>::process_invdfs(size_t begin, size_t end, const uint64 lsw, const
 }
 
 template<uint N, uint K>
+typename Dfs<N, K>::cost_t Dfs<N, K>::get_trie_evn(const cost_t m, const cost_t p, const cost_t q) {
+  cost_t e = ((1.0 + p) / p + 1.0 / (q - p * q)) *
+      std::pow(m, std::log(1.0 + p) / std::log((1.0 + p) / (1.0 + p * q - q)));
+  if (e >= 0 && e < m * N) return e;
+  return m * N;
+}
+
+template<uint N, uint K>
 std::tuple<bool, size_t, size_t> Dfs<N, K>::invbfs_step_dfs(size_t begin, size_t end, bool reduce_duplicates, size_t reduce_subsets) {
   Timer reserve("reserve");
   size_t next_begin = list_invbfs.size();
@@ -224,33 +240,6 @@ std::tuple<bool, size_t, size_t> Dfs<N, K>::invbfs_step_dfs(size_t begin, size_t
       end - begin);
   }
   timer.stop();
-
-  Timer sort_timer("sort & unique");
-  sort_sets_cardinality_descending<N>(
-      list_invbfs.begin() + next_begin,
-      list_invbfs.begin() + next_end,
-      [reduce_duplicates] (auto begin, auto end) {
-        if (!reduce_duplicates || begin == end) {
-          return;
-        }
-
-        if constexpr (THREADS == 1) {
-          std::sort(begin, end);
-        } else {
-          parallel_sort(
-            std::addressof(*begin),
-            std::distance(begin, end),
-            std::max(static_cast<size_t>(256), (static_cast<size_t>(std::distance(begin, end)) + THREADS - 1) / THREADS));
-        }
-      });
-
-  if (reduce_duplicates) {
-    next_end = next_begin + std::distance(
-      list_invbfs.begin() + next_begin,
-      std::unique(list_invbfs.begin() + next_begin, list_invbfs.begin() + next_end));
-    list_invbfs.resize(next_end);
-  }
-  sort_timer.stop();
 
   if (reduce_subsets) {
     Timer reduce_timer("reduce");
@@ -271,52 +260,90 @@ std::tuple<bool, size_t, size_t> Dfs<N, K>::invbfs_step_dfs(size_t begin, size_t
     reduce_timer.stop();
   }
 
-  Timer timer_sc("subsets check");
-  if constexpr (THREADS > 1) {
-    return {check_nextlist_multithreaded(next_begin, next_end), next_begin, next_end};
+  Timer sort_timer("sort");
+  static FastVector<std::pair<Iterator, Iterator>> segments;
+  segments.resize(N+1);
+  sort_sets_cardinality_descending<N>(
+      list_invbfs.begin() + next_begin,
+      list_invbfs.begin() + next_end,
+      [reduce_duplicates] (auto begin, auto end, uint card) {
+        segments[card] = {begin, end};
+        if (!reduce_duplicates || begin == end) {
+          return;
+        }
+
+        if constexpr (THREADS == 1) {
+          std::sort(begin, end, Subset<N>::comp_fast);
+        } else {
+          parallel_sort(
+            std::addressof(*begin),
+            std::distance(begin, end),
+            std::max(static_cast<size_t>(256), (static_cast<size_t>(std::distance(begin, end)) + THREADS - 1) / THREADS),
+            Subset<N>::comp_fast);
+        }
+      });
+  list_invbfs.resize(std::distance(list_invbfs.begin(), segments[1].first));
+  Logger::debug() << "Deleted " << next_end - list_invbfs.size() << " sets of cardinality <= 1";
+  next_end = list_invbfs.size();
+  sort_timer.stop();
+
+  if (reduce_duplicates) {
+    Timer duplicates_timer("remove duplicates");
+    next_end = next_begin + std::distance(
+      list_invbfs.begin() + next_begin,
+      std::unique(list_invbfs.begin() + next_begin, list_invbfs.begin() + next_end));
+    list_invbfs.resize(next_end);
+
+    auto lo = list_invbfs.begin() + next_begin;
+    auto end = list_invbfs.begin() + next_end;
+    for (uint sz = N; sz >= 2; --sz) {
+      segments[sz].first = lo;
+      auto hi = lo;
+      while (hi != end && hi->size() == sz) {
+        ++hi;
+      }
+      segments[sz] = {lo, hi};
+      lo = hi;
+    }
   }
 
-  for (uint i = next_begin; i < next_end; ++i) {
-    if (trie_bfs.contains_subset_of(list_invbfs[i])) {
+  Timer timer_sc("subsets check");
+  if (THREADS > 1 && next_end - next_begin > 32) {
+    ThreadPool pool;
+    pool.start(THREADS);
+
+    std::atomic<bool> ret = false;
+    for (uint sz = N; sz >= 2; --sz) {
+      auto [lo, hi] = segments[sz];
+      if (lo == hi) {
+        continue;
+      }
+
+      auto job = [this, lo, hi, &ret] {
+        if (this->trie_bfs.contains_subset_of(lo, hi)) {
+          ret = true;
+        }
+      };
+      pool.add_job(job);
+    }
+
+    pool.wait();
+
+    return {ret.load(), next_begin, next_end};
+  }
+
+  for (uint sz = N; sz >= 2; --sz) {
+    auto [lo, hi] = segments[sz];
+    if (lo == hi) {
+      continue;
+    }
+
+    if (trie_bfs.contains_subset_of(lo, hi)) {
       return {true, next_begin, next_end};
     }
   }
+
   return {false, next_begin, next_end};
-}
-
-template<uint N, uint K>
-bool Dfs<N, K>::check_nextlist_multithreaded(size_t begin, size_t end) {
-  bool ret = false;
-  std::mutex write_mutex;
-  FastVector<std::thread> threads;
-  for (size_t t = 0; t < THREADS; ++t) {
-      threads.push_back(std::thread([] (
-        size_t t,
-        std::mutex& write_mutex,
-        bool& ret,
-        FastVector<Subset<N>>& list_invbfs,
-        size_t begin,
-        size_t end,
-        const SubsetsTrie<N, THREADS>& trie_bfs) {
-
-      bool ans = false;
-      for (size_t i = begin + t; i < end; i += THREADS) {
-        if (trie_bfs.contains_subset_of(list_invbfs[i])) {
-          ans = true;
-          break;
-        }
-      }
-
-      const std::lock_guard<std::mutex> lock(write_mutex);
-      ret |= ans;
-    }, t, std::ref(write_mutex), std::ref(ret), std::ref(list_invbfs), begin, end, std::ref(trie_bfs)));
-  }
-
-  for(auto& thread : threads) {
-    thread.join();
-  }
-
-  return ret;
 }
 
 template<uint N, uint K>

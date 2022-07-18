@@ -4,6 +4,7 @@
 #include <synchrolib/data_structures/automaton.hpp>
 #include <synchrolib/data_structures/sets_trie_old.hpp>
 #include <synchrolib/data_structures/subset.hpp>
+#include <synchrolib/data_structures/preprocessed_transition.hpp>
 #include <synchrolib/data_structures/subset_utils.hpp>
 #include <synchrolib/utils/connectivity.hpp>
 #include <synchrolib/utils/vector.hpp>
@@ -59,10 +60,35 @@ public:
 #endif
 
     auto permuted_aut = Automaton<N, K>::permutation(data.aut, perm);
+    auto permuted_invaut = InverseAutomaton<N, K>(permuted_aut);
 
-    data.result.mlsw_upper_bound = get_automaton_lsw_cutoffinvbfs(
-    // data.result.mlsw_upper_bound = get_automaton_lsw_cutoffinvbfs_scores(
-        permuted_aut, data.invaut, static_cast<uint64>(BEAM_SIZE), data.result.mlsw_upper_bound);
+    uint bound;
+    if constexpr (DYNAMIC) {
+      using cost_t = long double;
+
+      constexpr cost_t beam_cost_weight = BEAM_EXACT_RATIO;
+      constexpr uint minimal_beamsize = MIN_BEAM_SIZE;
+      constexpr uint maximal_beamsize = MAX_BEAM_SIZE;
+
+      bound = get_automaton_lsw_cutoffinvbfs(permuted_aut, permuted_invaut, minimal_beamsize, data.result.mlsw_upper_bound);
+
+      cost_t exact_cost = 2 * std::pow(static_cast<cost_t>(K), (bound + 1) / 2);
+      cost_t proposed_beamsize = std::round(exact_cost * beam_cost_weight / bound);
+      uint beamsize = std::clamp<cost_t>(proposed_beamsize, minimal_beamsize, maximal_beamsize);
+      Logger::verbose() << "Dynamic beam: exact_cost " << exact_cost
+        << " proposed_beamsize " << proposed_beamsize
+        << " beamsize " << beamsize
+        << " min beamsize " << minimal_beamsize
+        << " max beamsize " << maximal_beamsize;
+
+      if (beamsize > minimal_beamsize) {
+        bound = get_automaton_lsw_cutoffinvbfs(permuted_aut, permuted_invaut, beamsize, bound);
+      }
+    } else {
+      bound = get_automaton_lsw_cutoffinvbfs(permuted_aut, permuted_invaut, BEAM_SIZE, data.result.mlsw_upper_bound);
+    }
+
+    data.result.mlsw_upper_bound = bound;
     Logger::info() << "Upper bound: " << data.result.mlsw_upper_bound;
 
     assert(data.result.mlsw_lower_bound <= data.result.mlsw_upper_bound);
@@ -73,6 +99,8 @@ private:
       const InverseAutomaton<N, K>& invaut, const uint beam_size,
       const uint64 max_mlsw) {
     FastVector<Subset<N>> list;
+    FastVector<Subset<N>> list_next;
+
     FastVector<bool> sink;
     get_automaton_reachable_states(aut, get_automaton_sink_component_vertex(aut), sink);
     for (uint n = 0; n < N; n++) {
@@ -86,6 +114,14 @@ private:
       }
     }
 
+    std::array<PreprocessedTransition<N, K>, K> invptrans;
+    for (uint k = 0; k < K; k++) {
+      invptrans[k] = PreprocessedTransition<N, K>(invaut, k);
+    }
+
+    size_t apply_time = 0;
+    size_t sort_time = 0;
+
     for (uint64 len = 1; len < max_mlsw; len++) {
       if constexpr (MAX_ITER >= 0) {
         if (len > MAX_ITER) {
@@ -94,27 +130,57 @@ private:
         }
       }
 
-      Logger::verbose() << "depth: " << len << " list size: " << list.size();
-      FastVector<Subset<N>> list_next(K * list.size());
-      for (size_t i = 0; i < list.size(); ++i) {
-        size_t offset = i * K;
-        for (uint k = 0; k < K; ++k) {
-          list[i].invapply(invaut, k, list_next[offset + k]);
-          auto size = list_next[offset + k].size();
-          if (size == N) {
-            return len;
+      Logger::debug() << "depth: " << len << " list size: " << list.size();
+      list_next.resize(K * list.size());
+
+      Timer apply_timer("apply");
+      if constexpr (true) {
+        for (uint k = 0; k < K; k++) {
+          invptrans[k].apply(list.data(),
+            list_next.data() + (k * list.size()),
+            list.size());
+        }
+      } else {
+        for (size_t i = 0; i < list.size(); ++i) {
+          size_t offset = i * K;
+          for (uint k = 0; k < K; ++k) {
+            list[i].invapply(invaut, k, list_next[offset + k]);
+            auto size = list_next[offset + k].size();
+            if (size == N) {
+              return len;
+            }
           }
         }
       }
+      apply_time += apply_timer.stop<false, std::chrono::microseconds>();
 
-      list = std::move(list_next);
-      sort_sets_cardinality_descending<N>(list.begin(), list.end(), [&](auto begin, auto end){
-        std::sort(begin, end);
+      std::swap(list, list_next);
+
+      Timer sort_timer("sort");
+      sort_sets_cardinality_descending<N>(list.begin(), list.end(), [&](auto begin, auto end, uint card){
+        if constexpr (true || THREADS == 1) { // TODO: use parallel
+          std::sort(begin, end, Subset<N>::comp_fast);
+        } else {
+          parallel_sort(
+            std::addressof(*begin),
+            std::distance(begin, end),
+            std::max(static_cast<size_t>(1024), (static_cast<size_t>(std::distance(begin, end)) + THREADS - 1) / THREADS),
+            Subset<N>::comp_fast);
+        }
       });
+      sort_time += sort_timer.stop<false, std::chrono::microseconds>();
+
+      if (list[0].size() == N) {
+        Logger::debug() << "apply sum " << apply_time / 1000 << "ms";
+        Logger::debug() << "sort sum " << sort_time / 1000 << "ms";
+        return len;
+      }
+
       keep_unique(list);
       if (list.size() > beam_size) {
         list.resize(beam_size);
       }
+
       Logger::debug() << list[0].size();
     }
 

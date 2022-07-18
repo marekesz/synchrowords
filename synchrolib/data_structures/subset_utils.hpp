@@ -8,13 +8,60 @@
 
 namespace synchrolib {
 
+// template <uint N, bool Ascending=false>
+// void sort_sets_cardinality_descending(
+//     typename FastVector<Subset<N>>::iterator begin,
+//     typename FastVector<Subset<N>>::iterator end,
+//     std::function<void(
+//       typename FastVector<Subset<N>>::iterator,
+//       typename FastVector<Subset<N>>::iterator)> fun) {
+//   size_t size = std::distance(begin, end);
+
+//   std::array<uint, N + 1> counts{};
+//   for (auto it = begin; it != end; ++it) {
+//     if constexpr (Ascending) {
+//       counts[N - it->size()]++;
+//     } else {
+//       counts[it->size()]++;
+//     }
+//   }
+
+//   uint sum = 0;
+//   for (int i = N; i >= 0; i--) {
+//     uint c = counts[i];
+//     counts[i] = sum;
+//     sum += c;
+//   }
+//   auto start_pos = counts;
+
+//   static FastVector<Subset<N>> tmp;
+//   tmp.resize(size);
+//   for (auto it = begin; it != end; ++it) {
+//     if constexpr (Ascending) {
+//       tmp[counts[N - it->size()]++] = *it;
+//     } else {
+//       tmp[counts[it->size()]++] = *it;
+//     }
+//   }
+//   std::copy(tmp.begin(), tmp.end(), begin);
+
+//   if (fun) {
+//     for (uint i = 0; i <= N; ++i) {
+//       fun(begin + start_pos[i], begin + counts[i]);
+//     }
+//   }
+// }
+
+// in-place version
+// ================
 template <uint N, bool Ascending=false>
 void sort_sets_cardinality_descending(
     typename FastVector<Subset<N>>::iterator begin,
     typename FastVector<Subset<N>>::iterator end,
     std::function<void(
       typename FastVector<Subset<N>>::iterator,
-      typename FastVector<Subset<N>>::iterator)> fun) {
+      typename FastVector<Subset<N>>::iterator,
+      uint)> fun) {
   size_t size = std::distance(begin, end);
 
   std::array<uint, N + 1> counts{};
@@ -34,25 +81,37 @@ void sort_sets_cardinality_descending(
   }
   auto start_pos = counts;
 
-  FastVector<Subset<N>> tmp(size);
-  for (auto it = begin; it != end; ++it) {
-    if constexpr (Ascending) {
-      tmp[counts[N - it->size()]++] = *it;
-    } else {
-      tmp[counts[it->size()]++] = *it;
+  for (auto it = end; it != begin;) {
+    --it;
+    while (true) {
+      uint id;
+      if constexpr (Ascending) {
+        id = N - it->size();
+      } else {
+        id = it->size();
+      }
+
+      auto they = begin + counts[id];
+      if (they > it) {
+        break;
+      } else {
+        counts[id]++;
+        std::swap(*they, *it);
+      }
     }
   }
-  std::copy(tmp.begin(), tmp.end(), begin);
 
-  for (uint i = 0; i <= N; ++i) {
-    fun(begin + start_pos[i], begin + counts[i]);
+  if (fun) {
+    for (uint i = 0; i <= N; ++i) {
+      fun(begin + start_pos[i], begin + counts[i], i);
+    }
   }
 }
 
 template <uint N, bool Ascending=false>
 void sort_sets_cardinality_descending(typename FastVector<Subset<N>>::iterator begin,
     typename FastVector<Subset<N>>::iterator end) {
-  sort_sets_cardinality_descending<N, Ascending>(begin, end, [](auto a, auto b){});
+  sort_sets_cardinality_descending<N, Ascending>(begin, end, nullptr);
 }
 
 template <uint S>

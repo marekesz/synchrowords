@@ -50,6 +50,7 @@ public:
 private:
   using Iterator = typename FastVector<Subset<N>>::iterator;
   using ConstIterator = typename FastVector<Subset<N>>::const_iterator;
+  using cost_t = long double;
 
   Automaton<N, K>& aut;
   InverseAutomaton<N, K>& invaut;
@@ -57,6 +58,8 @@ private:
   std::array<PreprocessedTransition<N, K>, K>& invptrans;
   uint64& reset_threshold;
   FastVector<Subset<N>>& list_bfs;
+  uint64 list_bfs_size;
+  cost_t density_bfs;
   FastVector<Subset<N>>& list_invbfs;
 
   uint64 max_depth;
@@ -73,11 +76,9 @@ private:
   void process_invdfs(size_t begin, size_t end, const uint64 lsw, const uint64 depth);
   std::tuple<bool, size_t, size_t> invbfs_step_dfs(size_t begin, size_t end, bool reduce_duplicates, size_t reduce_subsets);
 
-  bool check_nextlist_multithreaded(size_t begin, size_t end);
-
   void update_dfs_max_list_size();
   
-  using cost_t = long double;
+  cost_t get_trie_evn(const cost_t m, const cost_t p, const cost_t q);
 };
 
 }  // namespace synchrolib

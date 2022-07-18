@@ -14,11 +14,18 @@ constexpr uint SUBSET_SIZE_FOR_N(uint n) {
 }
 
 template <uint S>
+struct GpuSubset {
+  synchrolib::uint64 v[synchrolib::SUBSET_SIZE_FOR_N(S)];
+};
+
+template <uint S>
 struct Subset {
   static constexpr auto SS = SUBSET_SIZE_FOR_N;
   static constexpr uint buckets() { return SS(S); }
 
   uint64 v[SS(S)];
+
+  Subset() {} // Prevents zero-initialization in vector resize
 
   static inline Subset<S> Empty() {
     Subset<S> s;
@@ -62,9 +69,16 @@ struct Subset {
     return !((*this) == s);
   }
   __attribute__((pure, hot)) inline bool operator<(const Subset<S> &s) const {
-    for (uint b = 0; b < buckets(); ++b) { // TODO: use faster < when order is not important
+    for (uint b = 0; b < buckets(); ++b) {
       if (v[b] == s.v[b]) continue;
       return reverse64(v[b]) < reverse64(s.v[b]);
+    }
+    return false;
+  }
+  static inline bool comp_fast(const Subset<S> &l, const Subset<S> &r) {
+    for (uint b = 0; b < buckets(); ++b) {
+      if (l.v[b] == r.v[b]) continue;
+      return l.v[b] < r.v[b];
     }
     return false;
   }
@@ -112,7 +126,7 @@ struct Subset {
       uint n = b * SUBSETS_BITS;
       uint64 c = v[b];
       while (c) {
-        int shift = __builtin_ctzll(c);
+        uint shift = __builtin_ctzll(c);
         c >>= shift;
         n += shift;
         ++acc[n];
@@ -129,7 +143,7 @@ struct Subset {
       uint n = b * SUBSETS_BITS;
       uint64 c = v[b];
       while (c) {
-        int shift = __builtin_ctzll(c);
+        uint shift = __builtin_ctzll(c);
         c >>= shift;
         n += shift;
         s.set(aut[n][k]);
@@ -162,7 +176,7 @@ struct Subset {
       uint n = b * SUBSETS_BITS;
       uint64 c = v[b];
       while (c) {
-        int shift = __builtin_ctzll(c);
+        uint shift = __builtin_ctzll(c);
         c >>= shift;
         n += shift;
         for (uint e = invaut.begin(n, k); e < invaut.end(n, k); e++) {

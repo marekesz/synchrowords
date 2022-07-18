@@ -15,11 +15,11 @@
 
 namespace {
 
-template<synchrolib::uint N, synchrolib::uint K, synchrolib::uint B, synchrolib::uint S>
+template <synchrolib::uint N, synchrolib::uint K, synchrolib::uint B, synchrolib::uint S>
 __global__ void preprocessed_transition_kernel_impl(
     const synchrolib::PreprocessedTransition<N, K>* trans,
     const synchrolib::Subset<N>* from,
-    synchrolib::Subset<N>* to,
+    synchrolib::GpuSubset<N>* to,
     size_t cnt) {
 
   int ind = blockIdx.x * BLK + threadIdx.x;
@@ -28,7 +28,7 @@ __global__ void preprocessed_transition_kernel_impl(
   }
 
   synchrolib::Subset<N> sub = from[ind];
-  synchrolib::Subset<N> ret;
+  synchrolib::GpuSubset<N> ret;
   for (synchrolib::uint i = 0; i < B; ++i) {
     ret.v[i] = 0;
   }
@@ -52,12 +52,13 @@ namespace synchrolib {
 
 template<uint N, uint K>
 void preprocessed_transition_kernel(const PreprocessedTransition<N, K>& trans, const Subset<N>* from, Subset<N>* to, size_t cnt) {
+  static_assert(sizeof(Subset<N>) == sizeof(GpuSubset<N>));
   // for (size_t i = 0; i < cnt; ++i, ++from, ++to) {
   //   trans.apply(*from, *to);
   // }
   const PreprocessedTransition<N, K>* trans_ptr;
   const Subset<N>* from_ptr;
-  Subset<N>* to_ptr;
+  GpuSubset<N>* to_ptr;
 
 // std::chrono::steady_clock::time_point begin, end;
 // begin = std::chrono::steady_clock::now();

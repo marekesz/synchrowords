@@ -16,16 +16,10 @@ __global__ void subsets_trie_kernel_impl_v2(
     int small_cnt,
     int large_cnt,
     bool* results) {
-  // TODO: change to global and check if there's a difference
-  __shared__ synchrolib::Subset<N> sub[BLK];
-  int t = threadIdx.x;
-  int id = blockIdx.x * BLK + t;
+  int id = blockIdx.x * BLK + threadIdx.x;
   if (id >= large_cnt) {
     return;
   }
-  sub[t] = large[id];
-
-  __syncthreads();
 
   bool ret = false;
   for (int i = 0; i < small_cnt; ++i) {
@@ -33,7 +27,7 @@ __global__ void subsets_trie_kernel_impl_v2(
 
     bool good = true;
     for (int j = 0; j < B; ++j) {
-      if ((sub[t].v[j] & they.v[j]) != they.v[j]) {
+      if ((large[id].v[j] & they.v[j]) != they.v[j]) {
         good = false;
       }
     }
@@ -60,16 +54,10 @@ __global__ void subsets_trie_proper_kernel_impl_v2(
     int small_cnt,
     int large_cnt,
     bool* results) {
-  // TODO: change to global and check if there's a difference
-  __shared__ synchrolib::Subset<N> sub[BLK];
-  int t = threadIdx.x;
-  int id = blockIdx.x * BLK + t;
+  int id = blockIdx.x * BLK + threadIdx.x;
   if (id >= large_cnt) {
     return;
   }
-  sub[t] = large[id];
-
-  __syncthreads();
 
   bool ret = false;
   for (int i = 0; i < small_cnt; ++i) {
@@ -78,11 +66,11 @@ __global__ void subsets_trie_proper_kernel_impl_v2(
     bool good = true;
     bool same = true;
     for (int j = 0; j < B; ++j) {
-      if ((sub[t].v[j] & they.v[j]) != they.v[j]) {
+      if ((large[id].v[j] & they.v[j]) != they.v[j]) {
         good = false;
       }
 
-      if (sub[t].v[j] != they.v[j]) {
+      if (large[id].v[j] != they.v[j]) {
         same = false;
       }
     }

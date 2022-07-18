@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <cctype>
+#include <algorithm>
 #include <sstream>
 #include <string>
 
@@ -54,20 +56,20 @@ public:
     std::vector<EncodedAutomaton> ret;
     std::ifstream ss(path);
 
-    std::string line;
-    int line_num;
-    while (std::getline(ss, line)) {
-      uint N, K;
-      std::stringstream nkss(line);
-      if (!(nkss >> N >> K)) {
-        continue;
-      }
+    uint K, N;
+    while (ss >> K >> N) {
       if (N == 0 || K == 0) {
         Logger::error() << "N and K must be greater than 0";
         std::exit(3);
       }
-      std::getline(ss, line);
-      ret.push_back(EncodedAutomaton{N, K, line});
+      std::string aut;
+      for (size_t i = 0; i < static_cast<size_t>(K) * N; ++i) {
+        uint x;
+        ss >> x;
+        if (!aut.empty()) aut.push_back(' ');
+        aut += std::to_string(x);
+      }
+      ret.push_back(EncodedAutomaton{N, K, aut});
       ret.back().validate();
     }
 
@@ -79,7 +81,18 @@ public:
     output = std::move(stream);
   }
 
-  static void push_result(const AlgoResult& result) {
+  static size_t count_nonempty_lines(std::ifstream& stream) {
+    size_t ret = 0;
+    std::string s;
+    while (std::getline(stream, s)) {
+      if (!std::all_of(s.begin(), s.end(), ::isspace)) {
+        ret++;
+      }
+    }
+    return ret;
+  }
+
+  static void push_result(const AlgoResult& result, size_t index) {
     if (!output) {
       if (result.word) {
         Logger::info() << "Found synchronizing word of length "
@@ -89,6 +102,8 @@ public:
       return;
     }
 
+    *output << index << ": ";
+
     if (result.non_synchro) {
       *output << "NON SYNCHRO\n";
       output->flush();
@@ -97,6 +112,17 @@ public:
 
     *output << "[" << result.mlsw_lower_bound << ", "
             << result.mlsw_upper_bound << "]";
+
+    *output << " (";
+    bool first = true;
+    for (const auto& [name, time] : result.algorithms_run) {
+      if (!first) {
+        *output << ", ";
+      }
+      *output << "(" << name << ", " << time << ")";
+      first = false;
+    }
+    *output << ")";
 
     if (result.word) {
       Logger::info() << "Saving synchronizing word of length "

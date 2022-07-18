@@ -1,5 +1,5 @@
 {
-    "upper_bound": "1ULL * AUT_N * AUT_N * AUT_N / 6",
+    "upper_bound": "1ULL * (AUT_N - 1) * (AUT_N - 1) + 1",
     "threads": 1,
     "gpu": false,
     "algorithms": [
@@ -20,24 +20,27 @@
             "name": "Beam",
             "config": {
                 "presort": "indeg",
-                "beam_size": "AUT_N * AUT_N / 4"
+                "dynamic": true,
+                "min_beam_size": "AUT_N * std::log2(AUT_N)",
+                "max_beam_size": "AUT_N * AUT_N * std::log2(AUT_N)",
+                "beam_exact_ratio": 0.01
             }
         },
         {
             "name": "Reduce",
             "config": {
                 "min_n": "80",
-                "list_size_threshold": "AUT_N * 16"
+                "list_size_threshold": "AUT_N * AUT_K * 8"
             }
         },
         {
             "name": "Exact",
             "config": {
-                "dfs_min_list_size": "10000",
-                "bfs_small_list_size": "AUT_N * 16",
+                "dfs_min_list_size": "8192",
+                "bfs_small_list_size": "AUT_N * AUT_K * AUT_K * 8",
                 "dfs": true,
                 "dfs_shortcut": true,
-                "max_memory_mb": "2 * 1024"
+                "max_memory_mb": "12 * 1024"
             }
         }
     ]

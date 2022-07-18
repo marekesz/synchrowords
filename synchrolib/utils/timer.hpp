@@ -9,34 +9,35 @@ namespace synchrolib {
 class Timer : public NonMovable, public NonCopyable {  // TODO: movable
 public:
   Timer(std::string name)
-      : name_(name), start_(ms_since_epoch()), stopped_(false) {}
+      : name_(name), start_(time_since_epoch()), stopped_(false) {}
   ~Timer() { stop(); }
 
-  template<bool Log=true>
+  template<bool Log=true, typename Unit=std::chrono::milliseconds>
   size_t stop() {
     if (stopped_) {
       return 0;
     }
 
     stopped_ = true;
-    size_t now = ms_since_epoch();
+    auto now = time_since_epoch();
+    auto cnt = std::chrono::duration_cast<Unit>(now - start_);
+
     if constexpr (Log) {
       if (Logger::get_log_level() == Logger::LogLevel::DEBUG) {
-        std::cerr << "[" << name_ << "] " << now - start_ << "ms" << std::endl;
+        std::cerr << "[" << name_ << "] " << cnt.count() << "ms" << std::endl;
+        // TODO: fix when g++ supports << cnt
       }
     }
-    return now - start_;
+    return cnt.count();
   }
 
 private:
   std::string name_;
-  size_t start_;
+  Clock::duration start_;
   bool stopped_;
 
-  size_t ms_since_epoch() {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        Clock::now().time_since_epoch())
-        .count();
+  Clock::duration time_since_epoch() {
+    return Clock::now().time_since_epoch();
   }
 };
 

@@ -17,20 +17,28 @@ struct ReduceData {
 };
 
 struct AlgoResult {
+  struct AlgoRun {
+    std::string name;
+    size_t time;
+
+    AlgoRun(): name("unknown"), time(0) {}
+    AlgoRun(std::string algo_name): name(std::move(algo_name)), time(0) {}
+    AlgoRun(std::string algo_name, size_t algo_time): name(std::move(algo_name)), time(algo_time) {}
+  };
+
   bool non_synchro;
   uint64 mlsw_lower_bound;
   uint64 mlsw_upper_bound;
   std::optional<FastVector<uint>> word;
 
-  size_t algorithms_run;
+  std::vector<AlgoRun> algorithms_run;
 
   std::optional<ReduceData> reduce;  // used in Reduce, Exact
 
   AlgoResult():
       non_synchro(false),
       mlsw_lower_bound(0),
-      mlsw_upper_bound(std::numeric_limits<uint64>::max()),
-      algorithms_run(0) {}
+      mlsw_upper_bound(std::numeric_limits<uint64>::max()) {}
 };
 
 template <uint N, uint K>

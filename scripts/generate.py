@@ -2,7 +2,7 @@
 import argparse
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from random import randint, seed
+from numpy.random import default_rng
 from datetime import datetime
 import hashlib
 import os
@@ -16,35 +16,47 @@ def change_dir():
     dname = os.path.dirname(abspath)
     os.chdir(dname)
 
-def generate_random(N, K, file):
-    file.write(f'{N} {K}\n')
-    file.write(' '.join([str(randint(0, N-1)) for x in range(N * K)]))
-    file.write('\n')
+def generate_random(rng, N, K):
+    s = f'{K} {N} '
+    s += (' '.join([str(rng.integers(N)) for x in range(K * N)]))
+    s += '\n'
+    return s
 
-def generate_hard(N, K, file):
-    assert K == 2, 'hard only supports K = 2'
-    assert N > 3, 'hard only supports N > 3'
-
-    out = [0] * (N * K)
+def generate_cerny(N, K):
+    assert K == 2, 'cerny supports only K = 2'
+    out = [0] * (K * N)
     ind = lambda n, k: n * K + k
     for i in range(N-1):
         out[ind(i, 0)] = i + 1
-        out[ind(i, 1)] = i + 1
-    out[ind(N-1, 0)] = 0
-    out[ind(N-1, 1)] = 1
-    out[ind(1, 1)] = 0
-    out[ind(0, 1)] = 3
-    out[ind(2, 1)] = 3
-    file.write(f'{N} {K}\n')
-    file.write(' '.join(map(str, out)))
-    file.write('\n')
+        out[ind(i, 1)] = i
+    s = f'{K} {N}\n' + ' '.join(map(str, out)) + '\n'
+    return s
+
+# rt = n(n-1)/2
+def generate_slowlysink(N, K):
+    assert K == N-1, 'slowlysink supports only K = N-1'
+    
+    out = [0] * (K * N)
+    ind = lambda n, k: n * K + k
+    
+    for k in range(N-1):
+        for n in range(1, N):
+            out[ind(n, k)] = n
+        out[ind(k, k)] = k+1
+        out[ind(k+1, k)] = k
+    out[ind(0, 0)] = 0
+
+    s = f'{K} {N}\n'
+    s += ' '.join(map(str, out))
+    s += '\n'
+    return s
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('N', type=int)
     parser.add_argument('K', type=int)
+    parser.add_argument('N', type=int)
     parser.add_argument('-o', '--output', type=str,required=True, help='path to the output file')
-    parser.add_argument('-t', '--type', choices=['random', 'hard'], default='random')
+    parser.add_argument('-t', '--type', choices=['random', 'cerny', 'slowlysink'], default='random')
     parser.add_argument('-s', '--seed', type=int, default=seed_time(), help='seed (int) for the prng')
     parser.add_argument('-c', '--count', type=int, default=1, help='number of automata')
     parser.add_argument('-a', '--append', action='store_const', const=True, help='append at the end if the file exists')
@@ -54,14 +66,18 @@ def main():
         parser.error('File already exists, please use -a / --append to add automaton to it')
 
     print(f'Seed = {args.seed}')
-    seed(args.seed)
+    rng = default_rng(args.seed)
 
     with open(args.output, 'a+') as file:
+        s = ''
         for i in range(args.count):
             if args.type == 'random':
-                generate_random(args.N, args.K, file)
-            elif args.type == 'hard':
-                generate_hard(args.N, args.K, file)
+                s += generate_random(rng, args.N, args.K)
+            elif args.type == 'cerny':
+                s += generate_cerny(args.N, args.K)
+            elif args.type == 'slowlysink':
+                s += generate_slowlysink(args.N, args.K)
+        file.write(s)
 
 if __name__ == '__main__':
     main()

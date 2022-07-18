@@ -18,6 +18,7 @@ namespace synchrolib {
 template <uint N, uint Threads>
 class SubsetsTrie : public MemoryUsage {
 public:
+
   struct Node {
     uint zero, one; // it'ss possible to change zero from uint to bool - "is there a zero node?"
     uint division_bit;
@@ -26,17 +27,17 @@ public:
     uint subsets_pos;
 
     uint subtree_min_popcount;
-    Subset<N> subtree_and;
-
+    
     Node():
         zero(0),
         one(0),
         division_bit(N),
         subsets_cnt(0),
         subsets_pos(0),
-        subtree_min_popcount(std::numeric_limits<uint>::max()),
-        subtree_and(Subset<N>::Complete()) {}
+        subtree_min_popcount(std::numeric_limits<uint>::max()) {}
   };
+
+  using Iterator = typename FastVector<Subset<N>>::iterator;
 
   FastVector<Node> nodes;
   FastVector<Subset<N>> subsets;
@@ -68,9 +69,24 @@ public:
     nodes.shrink_to_fit();
   }
 
+  // template <bool Proper=false>
+  // bool contains_subset_of(const Subset<N>& set) const {
+  //   return contains_subset_of_impl<Proper>(root(), set);
+  // }
+
   template <bool Proper=false>
-  bool contains_subset_of(Subset<N> set) const {
-    return contains_subset_of_impl<Proper>(root(), set);
+  bool contains_subset_of(Iterator begin, Iterator end) const {
+    // for (auto it = begin; it != end; ++it) {
+    //   if (contains_subset_of(*it)) {
+    //     return true;
+    //   }
+    // }
+    // return false;
+    if (begin == end) {
+      return false;
+    }
+    uint set_size = begin->size();
+    return contains_subset_of_impl<Proper>(root(), begin, end, set_size);
   }
 
   void get_sets_list(FastVector<Subset<N>> &vec) const {
@@ -133,8 +149,6 @@ public:
 private:
   static constexpr uint M = 10;
 
-  using Iterator = typename FastVector<Subset<N>>::iterator;
-
   Node& root() {
     return nodes[0];
   }
@@ -158,7 +172,6 @@ private:
       while (begin != end) {
         nodes[v].subsets_cnt++;
         nodes[v].subtree_min_popcount = std::min(nodes[v].subtree_min_popcount, begin->size());
-        nodes[v].subtree_and &= *begin;
         ++begin;
       }
       return;
@@ -187,7 +200,6 @@ private:
       while (begin != end && nodes[v].subsets_cnt < M) {
         nodes[v].subsets_cnt++;
         nodes[v].subtree_min_popcount = std::min(nodes[v].subtree_min_popcount, begin->size());
-        nodes[v].subtree_and &= *begin;
         ++begin;
       }
       if (lo < begin) {
@@ -211,14 +223,12 @@ private:
       nodes[v].zero = create_node();
       build_impl(nodes[v].zero, depth + 1, begin, lo);
       nodes[v].subtree_min_popcount = std::min(nodes[v].subtree_min_popcount, nodes[nodes[v].zero].subtree_min_popcount);
-      nodes[v].subtree_and &= nodes[nodes[v].zero].subtree_and;
     }
 
     if (lo != end) {
       nodes[v].one = create_node();
       build_impl(nodes[v].one, depth + 1, lo, end);
       nodes[v].subtree_min_popcount = std::min(nodes[v].subtree_min_popcount, nodes[nodes[v].one].subtree_min_popcount);
-      nodes[v].subtree_and &= nodes[nodes[v].one].subtree_and;
     }
   }
 
@@ -232,7 +242,6 @@ private:
       while (begin != end) {
         nodes[v].subsets_cnt++;
         nodes[v].subtree_min_popcount = std::min(nodes[v].subtree_min_popcount, begin->size());
-        nodes[v].subtree_and &= *begin;
         ++begin;
       }
       return;
@@ -260,12 +269,12 @@ private:
     }
     if (!lo->is_set(division_bit)) lo++; // lo is the first element with bit set to one (or end)
 
+    // subsets_cnt > 0 only if there is no zero child
     if (std::distance(begin, lo) <= M) {
       nodes[v].subsets_pos = std::distance(subsets.begin(), begin);
       while (begin != end && nodes[v].subsets_cnt < M) {
         nodes[v].subsets_cnt++;
         nodes[v].subtree_min_popcount = std::min(nodes[v].subtree_min_popcount, begin->size());
-        nodes[v].subtree_and &= *begin;
         ++begin;
       }
       if (lo < begin) {
@@ -278,18 +287,15 @@ private:
       nodes[v].zero = create_node();
       build_impl_swap(nodes[v].zero, depth + 1, begin, lo);
       nodes[v].subtree_min_popcount = std::min(nodes[v].subtree_min_popcount, nodes[nodes[v].zero].subtree_min_popcount);
-      nodes[v].subtree_and &= nodes[nodes[v].zero].subtree_and;
     }
 
     if (lo != end) {
       nodes[v].one = create_node();
       build_impl_swap(nodes[v].one, depth + 1, lo, end);
       nodes[v].subtree_min_popcount = std::min(nodes[v].subtree_min_popcount, nodes[nodes[v].one].subtree_min_popcount);
-      nodes[v].subtree_and &= nodes[nodes[v].one].subtree_and;
     }
   }
 
-private:
   inline uint get_division_bit(Iterator begin, Iterator end) {
     size_t all = std::distance(begin, end);
     int count[N] = {};
@@ -343,69 +349,172 @@ private:
     return std::distance(count, std::max_element(count, count + N));
   }
 
-  // TODO: make popcount static
+  // TODO: removing maskelim seems to speed up the algorithm
   template <bool Proper>
-  bool contains_subset_of_impl(const Node& node, const Subset<N>& set) const {
+  bool contains_subset_of_impl(const Node& node, Iterator begin, Iterator end, uint set_size) const {
+    assert(!node.zero || node.one);
+
     if constexpr (Proper) {
-      if (set.size() <= node.subtree_min_popcount) {
+      if (set_size <= node.subtree_min_popcount) {
         return false;
       }
-      if (!set.is_proper_subset(node.subtree_and)) {
-        return false;
-      }
-
-      for (uint i = 0; i < node.subsets_cnt; ++i) {
-        if (set.is_proper_subset(subsets[node.subsets_pos + i])) {
-          return true;
-        }
-      }
-      
     } else {
-      if (set.size() < node.subtree_min_popcount) {
+      if (set_size < node.subtree_min_popcount) {
         return false;
       }
-      if (!set.is_subset(node.subtree_and)) {
-        return false;
-      }
-
-      // *** Opt
-      if (node.zero) {
-        
-        if (!set.is_set(node.division_bit)) {
-          return contains_subset_of_impl<Proper>(nodes[node.zero], set);
-        }
-        if (contains_subset_of_impl<Proper>(nodes[node.zero], set)) {
-          return true;
-        }
-        return node.one && contains_subset_of_impl<Proper>(nodes[node.one], set);
-      
-      } else {
-      
-        for (const Subset<N> *s = &subsets[node.subsets_pos]; s != &subsets[node.subsets_pos+node.subsets_cnt]; s++) {
-          if (set.is_subset(*s)) {
-            return true;
-          }
-        }
-
-        return node.one && set.is_set(node.division_bit) && contains_subset_of_impl<Proper>(nodes[node.one], set);
-      }
-      // *** End opt
     }
 
-    assert(node.division_bit < N || (!node.zero && !node.one));
-    if (node.division_bit == N) {
+    auto it = begin;
+    if (node.zero) {
+      // while (it != end) {
+      //   if constexpr (Proper) {
+      //     if (!it->is_proper_subset(node.subtree_and)) {
+      //       --end;
+      //       std::swap(*it, *end);
+      //     } else {
+      //       ++it;
+      //     }
+      //   } else {
+      //     if (!it->is_subset(node.subtree_and)) {
+      //       --end;
+      //       std::swap(*it, *end);
+      //     } else {
+      //       ++it;
+      //     }
+      //   }
+      // }
+      // if (begin == end) {
+      //   return false;
+      // }
+      if (contains_subset_of_impl<Proper>(nodes[node.zero], begin, end, set_size)) {
+        return true;
+      }
+    } else if (node.one) {
+      while (it != end) {
+        if constexpr (Proper) {
+          // if (!it->is_proper_subset(node.subtree_and)) {
+          //   --end;
+          //   std::swap(*it, *end);
+          // } else {
+            for (const Subset<N> *s = &subsets[node.subsets_pos]; s != &subsets[node.subsets_pos+node.subsets_cnt]; ++s) {
+              if (it->is_proper_subset(*s)) {
+                return true;
+              }
+            }
+            ++it;
+          // }
+        } else {
+          // if (!it->is_subset(node.subtree_and)) {
+          //   --end;
+          //   std::swap(*it, *end);
+          // } else {
+            for (const Subset<N> *s = &subsets[node.subsets_pos]; s != &subsets[node.subsets_pos+node.subsets_cnt]; ++s) {
+              if (it->is_subset(*s)) {
+                return true;
+              }
+            }
+            ++it;
+          // }
+        }
+      }
+      // if (begin == end) {
+      //   return false;
+      // }
+    } else {
+      while (it != end) {
+        if constexpr (Proper) {
+          // if (it->is_proper_subset(node.subtree_and)) {
+            for (const Subset<N> *s = &subsets[node.subsets_pos]; s != &subsets[node.subsets_pos+node.subsets_cnt]; ++s) {
+              if (it->is_proper_subset(*s)) {
+                return true;
+              }
+            }
+          // }
+        } else {
+          // if (it->is_subset(node.subtree_and)) {
+            for (const Subset<N> *s = &subsets[node.subsets_pos]; s != &subsets[node.subsets_pos+node.subsets_cnt]; ++s) {
+              if (it->is_subset(*s)) {
+                return true;
+              }
+            }
+          // }
+        }
+        ++it;
+      }
       return false;
     }
-    
-    if (!set.is_set(node.division_bit)) {
-      return node.zero && contains_subset_of_impl<Proper>(nodes[node.zero], set);
-    }
 
-    if (node.zero && contains_subset_of_impl<Proper>(nodes[node.zero], set)) {
-      return true;
+    auto bit = node.division_bit;
+    auto lo = begin;
+    auto hi = std::prev(end);
+    while (true) {
+      while (hi->is_set(bit)) {
+        if (lo >= hi) goto lb_endwhile;
+        hi--;
+      }
+      while (!lo->is_set(bit)) {
+        if (lo >= hi) goto lb_endwhile;
+        lo++;
+      }
+      std::swap(*lo, *hi);
+      lo++;
+      hi--;
+      if (lo >= hi) goto lb_endwhile;
     }
-    return node.one && contains_subset_of_impl<Proper>(nodes[node.one], set);
+    lb_endwhile:;
+    if (!lo->is_set(bit)) lo++; // lo is the first element with bit set to one (or end)
+    
+    return (lo != end) && contains_subset_of_impl<Proper>(nodes[node.one], lo, end, set_size);
   }
+
+  // TODO: make popcount static
+  // template <bool Proper>
+  // bool contains_subset_of_impl(const Node& node, const Subset<N>& set) const {
+  //   assert(!node.zero || node.one);
+
+  //   if constexpr (Proper) {
+  //     if (set.size() <= node.subtree_min_popcount) {
+  //       return false;
+  //     }
+  //     // if (!set.is_proper_subset(node.subtree_and)) {
+  //     //   return false;
+  //     // }
+  //   } else {
+  //     if (set.size() < node.subtree_min_popcount) {
+  //       return false;
+  //     }
+  //     // if (!set.is_subset(node.subtree_and)) {
+  //     //   return false;
+  //     // }
+  //   }
+    
+  //   assert(node.division_bit < N || (!node.zero && !node.one));
+
+  //   if (node.zero) {
+  //     if (!set.is_set(node.division_bit)) { // opt for quick return
+  //       return contains_subset_of_impl<Proper>(nodes[node.zero], set);
+  //     }
+  //     if (contains_subset_of_impl<Proper>(nodes[node.zero], set)) {
+  //       return true;
+  //     }
+  //     return contains_subset_of_impl<Proper>(nodes[node.one], set);
+  //   }
+
+  //   for (const Subset<N> *s = &subsets[node.subsets_pos]; s != &subsets[node.subsets_pos+node.subsets_cnt]; s++) {
+  //     if constexpr (Proper) {
+  //       if (set.is_proper_subset(*s)) {
+  //         return true;
+  //       }
+  //     } else {
+  //       if (set.is_subset(*s)) {
+  //         return true;
+  //       }
+  //     }
+  //   }
+
+  //   return node.one && set.is_set(node.division_bit) && contains_subset_of_impl<Proper>(nodes[node.one], set);
+  // }
+
 };
 
 }  // namespace synchrolib

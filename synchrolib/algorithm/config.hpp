@@ -22,6 +22,7 @@ std::string make_define(std::string name, bool value) {
 
 std::string make_undefine(std::string name) { return "#undef " + name + "\n"; }
 
+// TODO: code duplication
 std::string get_str_int(const json& json, const std::string& key, std::string default_value) {
   if (!json.contains(key)) {
     return default_value;
@@ -41,6 +42,16 @@ std::string get_str_bool(const json& json, const std::string& key, std::string d
     return val.get<std::string>();
   }
   return val.get<bool>() ? "true" : "false";
+}
+std::string get_str_float(const json& json, const std::string& key, std::string default_value) {
+  if (!json.contains(key)) {
+    return default_value;
+  }
+  auto val = json[key];
+  if (val.is_string()) {
+    return val.get<std::string>();
+  }
+  return std::to_string(val.get<long double>());
 }
 
 class AlgoConfig {

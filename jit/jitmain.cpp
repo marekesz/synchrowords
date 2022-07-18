@@ -23,7 +23,6 @@ void run(const std::string& aut_encoded,
   } else {
     data.result.non_synchro = false;
     data.result.mlsw_lower_bound = 0;
-    data.result.algorithms_run = 0;
 
     using BoundType = decltype(data.result.mlsw_upper_bound);
     data.result.mlsw_upper_bound = std::numeric_limits<BoundType>::max();
@@ -32,11 +31,13 @@ void run(const std::string& aut_encoded,
     }
   }
 
-  while (data.result.algorithms_run < algorithms.size()) {
-    Timer timer("algo" + algorithms[data.result.algorithms_run]);
-    make_algorithm<AUT_N, AUT_K>(algorithms[data.result.algorithms_run])
+  while (data.result.algorithms_run.size() < algorithms.size()) {
+    size_t current_algo = data.result.algorithms_run.size();
+
+    Timer timer("algo" + algorithms[current_algo]);
+    make_algorithm<AUT_N, AUT_K>(algorithms[current_algo])
         ->run(data);
-    data.result.algorithms_run++;
+    data.result.algorithms_run.emplace_back(algorithms[current_algo], timer.stop());
 
     if (data.result.reduce && !data.result.reduce->done) {
       result = data.result;
