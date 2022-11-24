@@ -3,7 +3,7 @@ In particular, the package contains an implementation of the fastest known algor
 
 If you are using it for research, please refer to the following paper:
 
-* Marek Szykuła and Adam Zyzik. **An Improved Algorithm for Finding the Shortest Synchronizing Words**. To appear in ESA 2022. Full version at [https://arxiv.org/abs/2207.05495](https://arxiv.org/abs/2207.05495)
+* Marek Szykuła and Adam Zyzik. **An Improved Algorithm for Finding the Shortest Synchronizing Words**. In European Symposium on Algorithms (ESA 2022), volume 202 of LIPIcs, pages 46:1--46:14, 2022, [[doi]](https://doi.org/10.4230/LIPIcs.ESA.2022.85). Full version at [[arxiv]](https://arxiv.org/abs/2207.05495).
 
 The related version used in these experiments is 1.1.0.
 
